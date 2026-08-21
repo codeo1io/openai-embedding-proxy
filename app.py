@@ -1,13 +1,15 @@
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 ALLOWED_MODEL = "text-embedding-3-small"
 UPSTREAM_URL = "https://api.openai.com/v1/embeddings"
+DEFAULT_KEY_FILE = "/data/openai_api_key"
 
 app = FastAPI(
     title="OpenAI Embedding Proxy",
@@ -17,18 +19,58 @@ app = FastAPI(
 )
 
 
-def _read_openai_key() -> str:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    key_file = os.getenv("OPENAI_API_KEY_FILE", "").strip()
+def _key_path() -> Path:
+    return Path(os.getenv("OPENAI_API_KEY_FILE", DEFAULT_KEY_FILE))
 
-    if key:
-        return key
-    if key_file:
+
+def _read_openai_key() -> str:
+    key_file = _key_path()
+    if key_file.exists():
         try:
-            return Path(key_file).read_text(encoding="utf-8").strip()
+            key = key_file.read_text(encoding="utf-8").strip()
         except OSError as exc:
             raise RuntimeError(f"Unable to read OPENAI_API_KEY_FILE: {exc}") from exc
-    raise RuntimeError("OPENAI_API_KEY or OPENAI_API_KEY_FILE must be configured")
+        if key:
+            return key
+
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if key:
+        return key
+
+    raise RuntimeError("OpenAI API key is not configured")
+
+
+def _save_openai_key(key: str) -> None:
+    key = key.strip()
+    if not key:
+        raise ValueError("API key must not be empty")
+
+    key_file = _key_path()
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=key_file.parent,
+            prefix=".openai_key.",
+            delete=False,
+        ) as temp:
+            temp.write(key)
+            temp.flush()
+            os.fsync(temp.fileno())
+            temp_name = temp.name
+
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, key_file)
+    except OSError as exc:
+        if temp_name:
+            try:
+                Path(temp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise RuntimeError(f"Unable to persist OpenAI API key: {exc}") from exc
 
 
 def _validate_caller_auth(authorization: str | None) -> None:
@@ -87,6 +129,69 @@ async def _handle_embeddings(request: Request, authorization: str | None) -> Res
         status_code=upstream.status_code,
         headers={"content-type": content_type},
     )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def key_ui() -> HTMLResponse:
+    configured = False
+    try:
+        _read_openai_key()
+        configured = True
+    except RuntimeError:
+        pass
+
+    state = "Configured" if configured else "Not configured"
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Embedding Proxy Key</title>
+<style>
+body{{font-family:system-ui,sans-serif;max-width:440px;margin:12vh auto;padding:0 18px;color:#202124}}
+form{{display:grid;gap:12px}}input,button{{font:inherit;padding:12px;border-radius:8px;border:1px solid #bbb}}
+button{{cursor:pointer}}small{{color:#666}}#msg{{min-height:1.4em}}
+</style>
+</head>
+<body>
+<h2>OpenAI API key</h2>
+<small>Status: {state}. Saved keys are never displayed.</small>
+<form id="keyForm">
+<input id="apiKey" type="password" autocomplete="off" placeholder="OpenAI API key" required>
+<button type="submit">Save key</button>
+<div id="msg"></div>
+</form>
+<script>
+const form=document.getElementById('keyForm'),input=document.getElementById('apiKey'),msg=document.getElementById('msg');
+form.addEventListener('submit',async(e)=>{{e.preventDefault();msg.textContent='Saving…';
+const r=await fetch('/admin/api-key',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{api_key:input.value}})}});
+const j=await r.json().catch(()=>({{}}));
+if(r.ok){{input.value='';msg.textContent='Saved.';}}else{{msg.textContent=j.detail||'Save failed.';}}
+}});
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@app.post("/admin/api-key")
+async def save_key(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("api_key"), str):
+        raise HTTPException(status_code=400, detail="api_key must be a string")
+
+    try:
+        _save_openai_key(payload["api_key"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return JSONResponse({"saved": True})
 
 
 @app.post("/v1/embeddings")

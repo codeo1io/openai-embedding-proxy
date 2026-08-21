@@ -129,3 +129,34 @@ def test_upstream_status_and_body_are_relayed(monkeypatch):
 
     assert response.status_code == 429
     assert response.json() == payload
+
+
+def test_admin_ui_saves_key_and_never_displays_it(monkeypatch, tmp_path):
+    saved_file = tmp_path / "saved_key"
+    monkeypatch.setenv("OPENAI_API_KEY_FILE", str(saved_file))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Not configured" in response.text
+
+    secret = "test-secret-value"
+    save = client.post("/admin/api-key", json={"api_key": secret})
+    assert save.status_code == 200
+    assert save.json() == {"saved": True}
+    assert saved_file.read_text() == secret
+    assert oct(saved_file.stat().st_mode & 0o777) == "0o600"
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Configured" in response.text
+    assert secret not in response.text
+
+
+def test_persisted_key_takes_precedence_over_env(monkeypatch, tmp_path):
+    saved_file = tmp_path / "saved_key"
+    saved_file.write_text("persisted-key")
+    monkeypatch.setenv("OPENAI_API_KEY_FILE", str(saved_file))
+    monkeypatch.setenv("OPENAI_API_KEY", "bootstrap-key")
+
+    assert proxy._read_openai_key() == "persisted-key"

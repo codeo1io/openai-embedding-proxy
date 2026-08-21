@@ -5,5 +5,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env or shell}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY_FILE: /data/openai_api_key
       UPSTREAM_TIMEOUT_SECONDS: ${UPSTREAM_TIMEOUT_SECONDS:-60}
+    volumes:
+      - embedding_proxy_data:/data
+
+volumes:
+  embedding_proxy_data:
