@@ -23,11 +23,11 @@ Clone the repository on the target VM, then:
 docker compose up -d --build
 ```
 
-Open `http://HOST:8080/`, paste the OpenAI API key, and press **Save key**. The key is stored in the `embedding_proxy_data` Docker volume and is not written to GitHub or the image.
+Open `http://HOST:18473/`, paste the OpenAI API key, and press **Save key**. The key is stored in the `embedding_proxy_data` Docker volume and is not written to GitHub or the image.
 
 You may optionally set `OPENAI_API_KEY` as a bootstrap/fallback environment variable. Once a key has been saved through the web UI, the persisted key takes precedence.
 
-The proxy listens on port `8080` by default.
+The proxy listens on port `18473` by default.
 
 ## Docker run
 
@@ -37,12 +37,12 @@ docker volume create embedding_proxy_data
 docker run -d \
   --name openai-embedding-proxy \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 18473:18473 \
   -v embedding_proxy_data:/data \
   openai-embedding-proxy
 ```
 
-Then open `http://HOST:8080/` and save the OpenAI API key. The named volume keeps it across container restarts/recreation and host reboots.
+Then open `http://HOST:18473/` and save the OpenAI API key. The named volume keeps it across container restarts/recreation and host reboots.
 
 You can also provide the upstream key through a mounted file instead of using the web UI:
 
@@ -50,7 +50,7 @@ You can also provide the upstream key through a mounted file instead of using th
 docker run -d \
   --name openai-embedding-proxy \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 18473:18473 \
   -v /secure/path/openai_key:/run/secrets/openai_key:ro \
   -e OPENAI_API_KEY_FILE=/run/secrets/openai_key \
   openai-embedding-proxy
@@ -61,7 +61,7 @@ docker run -d \
 Any non-empty bearer token is accepted from the client:
 
 ```bash
-curl http://HOST:8080/v1/embeddings \
+curl http://HOST:18473/v1/embeddings \
   -H 'Authorization: Bearer anything-at-all' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -73,7 +73,7 @@ curl http://HOST:8080/v1/embeddings \
 The singular alias is also accepted:
 
 ```bash
-curl http://HOST:8080/v1/embedding \
+curl http://HOST:18473/v1/embedding \
   -H 'Authorization: Bearer arbitrary-key' \
   -H 'Content-Type: application/json' \
   -d '{"model":"text-embedding-3-small","input":"hello world"}'

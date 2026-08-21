@@ -16,6 +16,6 @@ COPY app.py ./
 
 USER app
 
-EXPOSE 8080
+EXPOSE 18473
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--no-server-header"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "18473", "--no-server-header"]
