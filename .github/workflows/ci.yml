@@ -4,9 +4,19 @@ on:
   push:
   pull_request:
 
+# 2026-09-19: supersede-and-cancel — only the newest sha per ref is a real
+# signal; previously superseded runs stacked on the single self-hosted runner.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: self-hosted
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -17,6 +27,7 @@ jobs:
 
   docker:
     runs-on: self-hosted
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - run: docker build -t openai-embedding-proxy:ci .
